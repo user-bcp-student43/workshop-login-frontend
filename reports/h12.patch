@@ -1,0 +1,105 @@
+diff --git a/src/app/login/login.component.spec.ts b/src/app/login/login.component.spec.ts
+index 26cc2b7..4a65589 100644
+--- a/src/app/login/login.component.spec.ts
++++ b/src/app/login/login.component.spec.ts
+@@ -1,6 +1,7 @@
+ // @vitest-environment jsdom
+ import axios from 'axios';
+ import { TestBed } from '@angular/core/testing';
++import { Router } from '@angular/router';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { createDashboard, createLogin, createLoginFixture, createRouter, deferred } from '../../testing/workshop-test-helpers';
+ 
+@@ -281,16 +282,66 @@ describe('login characterization', () => {
+     });
+   });
+ 
+-  it('BUG H-12: reports navigation returning false instead of silently leaving login', async () => {
+-    const router = createRouter();
+-    router.navigate.mockResolvedValue(false);
+-    const component = createLogin(router);
+-    Object.assign(component, { username: 'student', password: 'fixture-only' });
+-    vi.mocked(axios.post).mockResolvedValue({ data: { token: 'test-token', user: {} } });
+-    await component.login();
+-    expect(component.busy).toBe(false);
+-    expect(component.message).toContain('Verifique sus credenciales');
+-  });
++  it.each([false, true, 'rejected'] as const)(
++    'BUG H-12: handles navigation result %s while keeping the stored session', async result => {
++      const router = createRouter();
++      if (result === 'rejected') {
++        router.navigate.mockRejectedValue(new Error('Navigation failed'));
++      } else {
++        router.navigate.mockResolvedValue(result);
++      }
++      const component = createLogin(router);
++      Object.assign(component, { username: 'student', password: 'fixture-only' });
++      vi.mocked(axios.post).mockResolvedValue({ data: { token: 'test-token', user: { username: 'student' } } });
++      await component.login();
++      expect(component.busy).toBe(false);
++      expect(localStorage.getItem('workshop_token')).toBe('test-token');
++      expect(JSON.parse(localStorage.getItem('workshop_user') || '{}')).toEqual({ username: 'student' });
++      expect(axios.post).toHaveBeenCalledTimes(1);
++      expect(router.navigate).toHaveBeenCalledExactlyOnceWith(['/dashboard']);
++      if (result === true) {
++        expect(component.message).toBe('');
++      } else {
++        expect(component.message).toContain('Verifique sus credenciales');
++      }
++    }
++  );
++
++  it.each([false, true, 'rejected'] as const)(
++    'BUG H-12: updates the real login view after asynchronous navigation result %s', async result => {
++      const fixture = await createLoginFixture();
++      Object.assign(fixture.componentInstance, { username: 'student', password: 'fixture-only' });
++      fixture.changeDetectorRef.markForCheck();
++      fixture.detectChanges();
++      const router = TestBed.inject(Router);
++      const navigation = deferred<boolean>();
++      vi.mocked(router.navigate).mockReturnValue(navigation.promise);
++      vi.mocked(axios.post).mockResolvedValue({ data: { token: 'test-token', user: { username: 'student' } } });
++      const element: HTMLElement = fixture.nativeElement;
++      const button = element.querySelector('button');
++      button?.click();
++      await vi.waitFor(() => expect(router.navigate).toHaveBeenCalledExactlyOnceWith(['/dashboard']));
++      await fixture.whenStable();
++      expect(button?.disabled).toBe(true);
++      if (result === 'rejected') {
++        navigation.reject(new Error('Navigation failed'));
++      } else {
++        navigation.resolve(result);
++      }
++      await navigation.promise.catch(() => undefined);
++      await fixture.whenStable();
++      expect(button?.disabled).toBe(false);
++      expect(localStorage.getItem('workshop_token')).toBe('test-token');
++      expect(JSON.parse(localStorage.getItem('workshop_user') || '{}')).toEqual({ username: 'student' });
++      expect(axios.post).toHaveBeenCalledTimes(1);
++      expect(router.navigate).toHaveBeenCalledTimes(1);
++      if (result === true) {
++        expect(element.querySelector('.message')).toBeNull();
++      } else {
++        expect(element.querySelector('.message')?.textContent).toContain('Verifique sus credenciales');
++      }
++    }
++  );
+ 
+   it('BUG H-13: does not keep a partial session if saving preferences fails', async () => {
+     const router = createRouter();
+diff --git a/src/app/login/login.component.ts b/src/app/login/login.component.ts
+index 3e7534d..b242e6c 100644
+--- a/src/app/login/login.component.ts
++++ b/src/app/login/login.component.ts
+@@ -45,7 +45,10 @@ export class LoginComponent {
+         return;
+       }
+       this.session.save(response.token, response.user, this.preferences);
+-      await this.router.navigate([AUTH_ROUTES.dashboard]);
++      const navigated = await this.router.navigate([AUTH_ROUTES.dashboard]);
++      if (navigated === false) {
++        throw new Error('Dashboard navigation was not completed');
++      }
+     } catch (error: unknown) {
+       this.message = 'No se pudo autenticar a ' + this.username + '. ' + userFacingError(error, 'login');
+     } finally {

@@ -45,7 +45,10 @@ export class LoginComponent {
         return;
       }
       this.session.save(response.token, response.user, this.preferences);
-      await this.router.navigate([AUTH_ROUTES.dashboard]);
+      const navigated = await this.router.navigate([AUTH_ROUTES.dashboard]);
+      if (navigated === false) {
+        throw new Error('Dashboard navigation was not completed');
+      }
     } catch (error: unknown) {
       this.message = 'No se pudo autenticar a ' + this.username + '. ' + userFacingError(error, 'login');
     } finally {

@@ -42,13 +42,13 @@ export class DashboardComponent implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
-    const token = this.session.getToken();
-    this.user = this.session.getUser();
-    if (!token) {
-      await this.router.navigate([AUTH_ROUTES.login]);
-      return;
-    }
     try {
+      const token = this.session.getToken();
+      this.user = this.session.getUser();
+      if (!token) {
+        await this.router.navigate([AUTH_ROUTES.login]);
+        return;
+      }
       const tasks = await this.tasksService.getTasks(token, this.user.username || '');
       const visibleTasks = selectVisibleTasks(tasks);
       this.zone.run(() => {

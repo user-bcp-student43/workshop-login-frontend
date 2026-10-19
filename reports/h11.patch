@@ -1,0 +1,92 @@
+diff --git a/src/app/dashboard/dashboard.component.spec.ts b/src/app/dashboard/dashboard.component.spec.ts
+index 88eb22e..2462750 100644
+--- a/src/app/dashboard/dashboard.component.spec.ts
++++ b/src/app/dashboard/dashboard.component.spec.ts
+@@ -101,21 +101,54 @@ describe('dashboard characterization', () => {
+   it('BUG H-11: corrupted user JSON should end loading and show a safe error', async () => {
+     seedSession();
+     localStorage.setItem('workshop_user', '{bad');
+-    const component = createDashboard();
++    const router = createRouter();
++    const component = createDashboard(router);
+     await expect(component.ngOnInit()).resolves.toBeUndefined();
+     expect(component.loading).toBe(false);
+     expect(component.error).toBe('No se pudo cargar el dashboard');
+     expect(axios.get).not.toHaveBeenCalled();
++    expect(router.navigate).not.toHaveBeenCalled();
++    expect(localStorage.getItem('workshop_user')).toBe('{bad');
+   });
+ 
+-  it('BUG H-11: inaccessible session storage should end loading and show a safe error', async () => {
+-    const component = createDashboard();
+-    vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new DOMException('Storage blocked', 'SecurityError'); });
+-    await expect(component.ngOnInit()).resolves.toBeUndefined();
+-    expect(component.loading).toBe(false);
+-    expect(component.error).toBe('No se pudo cargar el dashboard');
+-    expect(axios.get).not.toHaveBeenCalled();
+-  });
++  it.each(['workshop_token', 'workshop_user'])(
++    'BUG H-11: inaccessible %s should end loading and show a safe error', async blockedKey => {
++      seedSession();
++      const router = createRouter();
++      const component = createDashboard(router);
++      const read = localStorage.getItem.bind(localStorage);
++      vi.spyOn(localStorage, 'getItem').mockImplementation(key => {
++        if (key === blockedKey) throw new DOMException('Storage blocked', 'SecurityError');
++        return read(key);
++      });
++      await expect(component.ngOnInit()).resolves.toBeUndefined();
++      expect(component.loading).toBe(false);
++      expect(component.error).toBe('No se pudo cargar el dashboard');
++      expect(axios.get).not.toHaveBeenCalled();
++      expect(router.navigate).not.toHaveBeenCalled();
++    }
++  );
++
++  it.each(['corrupt-user', 'workshop_token', 'workshop_user'])(
++    'BUG H-11: renders a safe initialization error without loading placeholders for %s', async scenario => {
++      seedSession();
++      if (scenario === 'corrupt-user') {
++        localStorage.setItem('workshop_user', '{bad');
++      } else {
++        const read = localStorage.getItem.bind(localStorage);
++        vi.spyOn(localStorage, 'getItem').mockImplementation(key => {
++          if (key === scenario) throw new DOMException('Storage blocked', 'SecurityError');
++          return read(key);
++        });
++      }
++      const fixture = await createDashboardFixture();
++      const element: HTMLElement = fixture.nativeElement;
++      expect(element.querySelector('.error')?.textContent).toBe('No se pudo cargar el dashboard');
++      expect(element.querySelector('.state-row')).toBeNull();
++      expect(element.querySelector('.grid')).toBeNull();
++      expect(axios.get).not.toHaveBeenCalled();
++    }
++  );
+ 
+   it.each([400, 401, 403, 404, 429, 500, 503])('handles tasks HTTP %s without losing session or redirecting', async status => {
+     seedSession();
+diff --git a/src/app/dashboard/dashboard.component.ts b/src/app/dashboard/dashboard.component.ts
+index 473c2d8..b55d003 100644
+--- a/src/app/dashboard/dashboard.component.ts
++++ b/src/app/dashboard/dashboard.component.ts
+@@ -42,13 +42,13 @@ export class DashboardComponent implements OnInit {
+   }
+ 
+   async ngOnInit(): Promise<void> {
+-    const token = this.session.getToken();
+-    this.user = this.session.getUser();
+-    if (!token) {
+-      await this.router.navigate([AUTH_ROUTES.login]);
+-      return;
+-    }
+     try {
++      const token = this.session.getToken();
++      this.user = this.session.getUser();
++      if (!token) {
++        await this.router.navigate([AUTH_ROUTES.login]);
++        return;
++      }
+       const tasks = await this.tasksService.getTasks(token, this.user.username || '');
+       const visibleTasks = selectVisibleTasks(tasks);
+       this.zone.run(() => {

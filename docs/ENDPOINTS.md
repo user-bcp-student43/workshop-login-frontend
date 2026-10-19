@@ -96,7 +96,7 @@ Mientras el POST esta pendiente, busy es true y el boton muestra el estado de in
 | Token recibido truthy pero invalido, expirado o de tipo no esperado | El login no lo detecta: guarda la sesion y navega. Si /api/tasks lo rechaza, el dashboard muestra el error de tareas indicado en su apartado. No se promete una validacion criptografica local. |
 | user ausente o null | No es un error que impida el login: se guarda {} y se avanza con token. El owner posterior sera vacio si no hay username string. Otros tipos/campos no se validan antes de persistirlos. |
 | Falla al persistir, por ejemplo localStorage no disponible | La excepcion dentro de save llega al mismo catch de login. busy vuelve a false; no se llega a navegar si save lanza. Las escrituras no son transaccionales: pueden quedar token o usuario parcialmente guardados. |
-| La navegacion a dashboard rechaza su promesa | Llega al mismo catch y busy se restablece. La sesion ya fue guardada y no se revierte. Si Router devuelve false sin rechazar, no existe una rama que muestre un error de navegacion. |
+| La navegacion a dashboard rechaza su promesa o Router devuelve false | El rechazo llega al catch; si devuelve false, LoginComponent genera un error local dentro del try y reutiliza ese mismo catch. Muestra el mensaje seguro de login, restablece busy y notifica la vista. La sesion ya guardada se conserva; no se reintenta el POST ni la navegacion. Con true se mantiene el camino exitoso. |
 
 Un login fallido o sin token no borra automaticamente una sesion previa. Los mensajes locales describen el resultado visible, no prueban la causa exacta del error del servidor.
 
@@ -122,7 +122,7 @@ Evidencia: [control de flujo y finally](../src/app/login/login.component.ts), [m
 
 DashboardComponent llama TasksService.getTasks(token, username) durante ngOnInit, despues de recuperar token y usuario mediante SessionService. TasksService ejecuta axios.get y devuelve response.data como el arreglo esperado de Task.
 
-El componente comprueba solo presencia del token. Si falta, navega a /login y no realiza el GET. El parseo del usuario almacenado ocurre antes de esa comprobacion y fuera del try/catch de la llamada HTTP. No se configura polling, refresco automatico o reintento; una recarga o nueva inicializacion del dashboard vuelve a consultar.
+El componente comprueba solo presencia del token. Si falta y la sesion es legible, navega a /login y no realiza el GET. La lectura de token y el parseo del usuario estan dentro del try/catch de inicializacion: si fallan, se muestra el error local y termina loading, sin GET ni redireccion. No se configura polling, refresco automatico o reintento; una recarga o nueva inicializacion del dashboard vuelve a consultar.
 
 Evidencia: [DashboardComponent](../src/app/dashboard/dashboard.component.ts), [TasksService](../src/app/services/tasks.service.ts) y [SessionService](../src/app/services/session.service.ts).
 
@@ -218,7 +218,7 @@ Mientras el GET sigue pendiente, loading es true y se muestran placeholders de c
 | Array con elementos null o undefined | El acceso a task.status durante el filtrado puede lanzar y terminar en el mismo catch. No se omiten automaticamente registros invalidos. |
 | Array con campos ausentes | Muchos campos son opcionales: puede renderizar tareas incompletas y usar defaults de label/status, en lugar de tratarlo como error. No existe un rechazo de schema antes del renderizado. |
 | Tipos inesperados en campos, por ejemplo status truthy que no es string | No hay validacion general. Pueden fallar funciones de etiqueta/estado o el renderizado; si la excepcion ocurre dentro del procesamiento y detectChanges protegidos por try, aplica el catch generico. No se garantiza una reaccion unica para cualquier estructura invalida. |
-| JSON de workshop_user sintacticamente invalido o lectura de almacenamiento que lanza | Ocurre antes del try HTTP y de la comprobacion de token. La inicializacion puede rechazar, no sale el GET y no se establece el mensaje generico; loading queda true y no hay redireccion garantizada. Es un defecto local que sigue presente. |
+| JSON de workshop_user sintacticamente invalido o lectura de almacenamiento que lanza | Se captura durante la inicializacion: mensaje No se pudo cargar el dashboard, loading false y actualizacion de vista. No se consulta HTTP ni se navega a login por ese error. No se borra ni repara automaticamente la sesion persistida. |
 | Usuario persistido no objeto, o username/displayName de tipo no string | SessionService devuelve usuario vacio o campos undefined. No produce por si solo el error de tareas; si hay token el owner se envia vacio. La respuesta depende del backend. |
 
 Evidencia: [DashboardComponent](../src/app/dashboard/dashboard.component.ts), [SessionService](../src/app/services/session.service.ts), [selectVisibleTasks](../src/app/utils/task-selection.ts), [mensaje local](../src/app/utils/user-facing-error.ts), [tests de dashboard](../src/app/dashboard/dashboard.component.spec.ts), [tests de sesion](../src/app/services/session.service.spec.ts) y [defaults de timeout/JSON de Axios](../node_modules/axios/lib/defaults/index.js).

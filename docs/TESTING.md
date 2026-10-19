@@ -1,8 +1,60 @@
 # Pruebas de login y tareas
 
-Fecha: 2026-10-19. Contrato de referencia: [docs/ENDPOINTS.md](ENDPOINTS.md). Se ampliaron specs existentes y el helper de fixtures; no se modificaron componentes, servicios productivos, endpoints, dependencias ni gates. El seguimiento de bugs permanece exclusivamente en [HALLAZGOS.md](../HALLAZGOS.md).
+Fecha: 2026-10-19. Contrato de referencia: [docs/ENDPOINTS.md](ENDPOINTS.md). La fase inicial amplio pruebas sin cambiar produccion. La implementacion posterior del plan activo corrige los items autorizados y se registra por separado abajo; el seguimiento de estados permanece exclusivamente en [HALLAZGOS.md](../HALLAZGOS.md).
 
-**Resultado completo: 133 pruebas ejecutadas, 127 aprobadas y 6 fallidas.** No hay tests pendientes ni omitidos en la ejecucion final. Los seis fallos reproducen cuatro bugs, no errores de compilacion. No se usaron skip, todo, fails, filtros de exclusion ni expectativas inversas para hacer pasar esas regresiones.
+**Resultado historico de la ampliacion inicial: 133 pruebas, 127 aprobadas y 6 fallidas.** No hubo pendientes ni omitidas en esa ejecucion. Las tablas de comandos, resultados y fallos de la fase inicial se conservan como evidencia historica, no como estado actual de los items ya corregidos.
+
+## Implementacion secuencial del plan activo
+
+### H-11: errores al recuperar la sesion
+
+Tuvo aprobacion humana en el mensaje de implementacion. Se incluyeron getToken y getUser dentro del try/catch existente de ngOnInit, conservando servicios, almacenamiento, endpoints y politicas de 401/403. El catch muestra el mensaje seguro, termina loading y actualiza la vista; una lectura fallida no dispara GET, redireccion ni limpieza de datos.
+
+**Diff local propio:** [reports/h11.patch](../reports/h11.patch), limitado al componente de dashboard y sus pruebas. Se reforzaron Router, errores independientes de token/usuario y tres fixtures DOM con plantilla real.
+
+| Comando desde workshop-login-frontend | Salida | Resultado real de H-11 |
+|---|---|---|
+| npm test -- src/app/dashboard/dashboard.component.spec.ts --testNamePattern="BUG H-11" --reporter=json --outputFile=reports/h11-before.json | 1 | 6 fallidas antes de corregir produccion; 43 no seleccionadas. |
+| npm test -- src/app/dashboard/dashboard.component.spec.ts --testNamePattern="BUG H-11" --reporter=json --outputFile=reports/h11-after.json | 0 | Las mismas 6 aprobadas despues; 43 no seleccionadas. |
+| npm run test:typecheck | 0 | Tipos estrictos aprobados. |
+| npm run build | 0 | Compilacion y budgets aprobados; warning CommonJS de lodash/merge conservado. |
+| npm run test:coverage -- --coverage.reportOnFailure --reporter=json --outputFile=reports/h11-full.json | 1 | 137 casos completos, 133 aprobados, 4 fallos de H-12/H-13/H-14; cobertura 100% en las cuatro metricas. |
+
+Evidencia: [rojo H-11](../reports/h11-before.json), [verde H-11](../reports/h11-after.json) y [suite completa tras H-11](../reports/h11-full.json). Las selecciones por item son comprobaciones focalizadas, no exclusiones del gate completo. El estado H-11 se actualizo a Resuelto antes de iniciar el siguiente item; no se ocultaron los cuatro fallos residuales.
+
+### H-12: navegacion que devuelve false
+
+Se empezo solo despues de que H-11 quedara con sus seis tests en verde y su fila actualizada. Se captura el booleano de Router; false genera un error local dentro del try y reutiliza el catch y finally existentes. No se cambian sesion, rutas, POST ni servicios; se conserva token/usuario incluso si la navegacion falla, sin implementar rollback de H-13.
+
+**Diff local propio:** [reports/h12.patch](../reports/h12.patch), limitado al componente de login y sus pruebas. Los tests verifican false, true y rechazo, un solo POST/navegacion, sesion intacta y reactivacion del boton con clic real y respuesta diferida, sin deteccion manual despues del await.
+
+| Comando desde workshop-login-frontend | Salida | Resultado real de H-12 |
+|---|---|---|
+| npm test -- src/app/login/login.component.spec.ts --testNamePattern="BUG H-12" --reporter=json --outputFile=reports/h12-before.json | 1 | 4 aprobadas y 2 fallidas antes del cambio; fallan solo false en unidad y DOM. 48 no seleccionadas. |
+| npm test -- src/app/login/login.component.spec.ts --testNamePattern="BUG H-12" --reporter=json --outputFile=reports/h12-after.json | 0 | Las mismas 6 aprobadas despues; 48 no seleccionadas. |
+| npm run test:typecheck | 0 | Tipos estrictos aprobados. |
+| npm run build | 0 | Compilacion y budgets aprobados; warning CommonJS de lodash/merge conservado. |
+| npm run test:coverage -- --coverage.reportOnFailure --reporter=json --outputFile=reports/h12-full.json | 1 | 142 casos completos, 139 aprobados y 3 fallos de H-13/H-14, sin pendientes ni omitidos; cobertura 100% en las cuatro metricas. |
+
+Evidencia: [rojo H-12](../reports/h12-before.json), [verde H-12](../reports/h12-after.json) y [suite completa final](../reports/h12-full.json). H-11 y H-12 quedan Resueltos con sus pruebas propias verdes. La suite global sigue roja: quedan una regresion de persistencia parcial y dos de logout, fuera del plan. H-03 no se implementa. No se cambiaron gates ni se filtraron esos fallos en la ejecucion completa.
+
+```diff
+// H-11: el mismo try/catch de ngOnInit ahora incluye la sesion.
+- const token = this.session.getToken();
+- this.user = this.session.getUser();
+  try {
++   const token = this.session.getToken();
++   this.user = this.session.getUser();
+
+// H-12: mismo guardado previo y mismo catch/finally.
+- await this.router.navigate([AUTH_ROUTES.dashboard]);
++ const navigated = await this.router.navigate([AUTH_ROUTES.dashboard]);
++ if (navigated === false) {
++   throw new Error('Dashboard navigation was not completed');
++ }
+```
+
+El bloque anterior es un diff conceptual abreviado; los dos archivos patch contienen los diffs locales reales completos de produccion y pruebas, separados por item. HTTP, cabeceras, cuerpos, timeout y parametros permanecen intactos. No se ejecutaron nuevas pruebas manuales contra servidores externos; los casos de XHR y flujo integrado forman parte de la suite automatizada sin filtros.
 
 ## Casos y expectativas
 
@@ -27,7 +79,7 @@ La tabla diferencia expectativas de compatibilidad con el contrato actual de exp
 | Login | Falla la primera escritura de sesion | Error | Mensaje local, busy false y no navegacion. |
 | Login | Falla la escritura de preferencias despues de token/usuario, BUG H-13 | Error | No dejar una sesion parcial tras informar login fallido. Regresion activa: hoy falla. |
 | Login | Router.navigate rechaza una promesa | Error | Mostrar mensaje local, busy false; la sesion ya guardada se conserva segun contrato actual. |
-| Login | Router.navigate devuelve false, BUG H-12 | Error | Informar que no se completo la navegacion en vez de terminar silenciosamente. Regresion activa: hoy falla. |
+| Login | Router.navigate devuelve false, BUG H-12 | Error | Mostrar el mensaje local conservando sesion, busy false y notificacion de vista. Seis pruebas de false/true/rechazo y DOM aprobadas tras la correccion. |
 | Login DOM | Usuario con etiquetas inocuas y error remoto | Error | Mostrar etiquetas como texto, sin elementos HTML ni detalle privado; reactivar boton despues de respuesta asincrona. |
 | Tareas | Token local ausente con usuario parseable | Caso borde | Redirigir a login sin GET. |
 | Tareas | [] o ninguna tarea visible | Caso borde | Terminar loading, mostrar estado vacio; no tratarlo como error. |
@@ -42,14 +94,14 @@ La tabla diferencia expectativas de compatibilidad con el contrato actual de exp
 | Tareas | 2xx con null, string, HTML, body vacio/204 o envoltorio en vez de array | Error | Error seguro y loading false; no convertirlo a [] exitoso. |
 | Tareas | Array con elemento null/undefined | Error | Error seguro, no omitir silenciosamente el registro invalido. |
 | Tareas DOM | status truthy numerico durante renderizado real | Error | Gestionar el error capturado durante detectChanges, mostrar error local y ocultar grilla. |
-| Tareas | JSON de usuario corrupto o storage bloqueado, BUG H-11 | Error | Contener el error de inicializacion, terminar loading y mostrar error local sin GET. Dos regresiones activas: hoy fallan. |
+| Tareas | JSON de usuario corrupto o storage bloqueado, BUG H-11 | Error | Contener el error de inicializacion, terminar loading y mostrar error local sin GET ni redireccion. Seis regresiones actuales, incluidas DOM, aprobadas tras la correccion. |
 | Logout | Fallo de storage o rechazo de navegacion, BUG H-14 | Error | Contener el rechazo y mostrar un error en la vista, sin fingir cierre correcto. Dos regresiones activas: hoy fallan. |
 
 Las ramas comunes de errores se verifican con mocks de Axios sobre componentes y servicios reales. Los casos XHR usan un servidor efimero de loopback creado por el spec, no los otros componentes del workspace. CORS se representa con ERR_NETWORK en pruebas unitarias: no se afirma haber verificado la politica CORS del backend real.
 
-## Codigo de los tests
+## Codigo de los tests de la fase inicial
 
-El codigo ejecutable completo esta en estos archivos existentes ampliados:
+Los conteos y fragmentos siguientes documentan la fase inicial de 133 tests; sus archivos enlazados contienen ahora tambien las ampliaciones del plan activo. El diff de cada item muestra los cambios respecto de ese codigo ejecutado originalmente:
 
 - [src/app/login/login.component.spec.ts](../src/app/login/login.component.spec.ts): 49 casos.
 - [src/app/dashboard/dashboard.component.spec.ts](../src/app/dashboard/dashboard.component.spec.ts): 45 casos.
@@ -178,7 +230,7 @@ it('BUG H-11: corrupted user JSON should end loading and show a safe error', asy
 
 Esta prueba fallo realmente porque ngOnInit rechazo con SyntaxError. La prueba anterior esperaba la excepcion como exito; se sustituyo por esta expectativa correctiva. No se cambio produccion ni se marco el caso como esperado-fallido. El test directo de parseo de SessionService sigue verificando la excepcion de esa frontera; no sustituye la responsabilidad del componente de manejarla.
 
-## Comandos, directorio y resultados ejecutados
+## Comandos y resultados de la fase inicial
 
 Directorio de todos los comandos: reqflow-workspace/workshop-login-frontend, ruta canonica de esta maquina `C:\Users\Usuario\Documents\t63732-edgar-chipana\reqflow-workspace\workshop-login-frontend`. Se ejecuto npm desde esa carpeta, sin prefijo con unidad minuscula ni servicios externos.
 
@@ -203,7 +255,7 @@ npm run test:typecheck
 
 En la prueba de conexion rota, jsdom emitio en stderr Error: socket hang up. Es consecuencia esperada del socket destruido y la asercion ERR_NETWORK paso; no se silencio ese aviso. No se interpretan errores de red simulados como evidencia de indisponibilidad de los backends reales.
 
-## Resultados por archivo
+## Resultados por archivo de la fase inicial
 
 | Archivo | Ejecutadas | Aprobadas | Fallidas |
 |---|---|---|---|
@@ -221,18 +273,18 @@ En la prueba de conexion rota, jsdom emitio en stderr Error: socket hang up. Es 
 
 Los tests parametrizados cuentan cada entrada de la matriz como un caso. Los 61 casos netos adicionales incluyen reemplazar una caracterizacion que aprobaba el defecto por una regresion que falla, no solamente agregar casos verdes.
 
-## Fallos y bugs reportados aparte
+## Fallos historicos de la fase inicial
 
-Esta tabla informa la ejecucion, no lleva estados de seguimiento. Los ids se registran en HALLAZGOS.md.
+Esta tabla informa la ejecucion inicial, no lleva estados de seguimiento. Las correcciones posteriores estan arriba y en HALLAZGOS.md; las referencias a pruebas remiten a sus versiones actuales.
 
 | Regresion | Observacion real | Evidencia |
 |---|---|---|
 | H-11, JSON de usuario corrupto | Se esperaba resolver y finalizar carga; ngOnInit rechazo con SyntaxError antes del GET. | [dashboard.component.spec.ts:101](../src/app/dashboard/dashboard.component.spec.ts#L101); [SessionService:19](../src/app/services/session.service.ts#L19) |
-| H-11, almacenamiento inaccesible | Rechazo SecurityError durante getToken, fuera del try; no llega al manejo de error de UI. | [dashboard.component.spec.ts:111](../src/app/dashboard/dashboard.component.spec.ts#L111); [DashboardComponent:45](../src/app/dashboard/dashboard.component.ts#L45) |
-| H-12, navegacion devuelve false | La expectativa de mensaje fallo: message era cadena vacia. | [login.component.spec.ts:284](../src/app/login/login.component.spec.ts#L284); [LoginComponent:48](../src/app/login/login.component.ts#L48) |
-| H-13, persistencia parcial | Tras fallar preferencias permanecio test-token en vez de null. | [login.component.spec.ts:295](../src/app/login/login.component.spec.ts#L295); [SessionService:37](../src/app/services/session.service.ts#L37) |
-| H-14, logout con storage bloqueado | La expectativa de error contenido fallo: promesa rechazada con SecurityError. | [dashboard.component.spec.ts:228](../src/app/dashboard/dashboard.component.spec.ts#L228); [DashboardComponent:70](../src/app/dashboard/dashboard.component.ts#L70) |
-| H-14, logout con navegacion rechazada | Promesa rechazada con Navigation failed, sin mensaje propio de UI. | [dashboard.component.spec.ts:228](../src/app/dashboard/dashboard.component.spec.ts#L228); [DashboardComponent:71](../src/app/dashboard/dashboard.component.ts#L71) |
+| H-11, almacenamiento inaccesible | Rechazo SecurityError durante getToken, fuera del try; no llegaba al manejo de error de UI. | [dashboard.component.spec.ts:115](../src/app/dashboard/dashboard.component.spec.ts#L115); [DashboardComponent](../src/app/dashboard/dashboard.component.ts) |
+| H-12, navegacion devuelve false | La expectativa de mensaje fallo: message era cadena vacia. | [login.component.spec.ts:286](../src/app/login/login.component.spec.ts#L286); [LoginComponent:48](../src/app/login/login.component.ts#L48) |
+| H-13, persistencia parcial | Tras fallar preferencias permanecio test-token en vez de null. | [login.component.spec.ts:346](../src/app/login/login.component.spec.ts#L346); [SessionService:37](../src/app/services/session.service.ts#L37) |
+| H-14, logout con storage bloqueado | La expectativa de error contenido fallo: promesa rechazada con SecurityError. | [dashboard.component.spec.ts:261](../src/app/dashboard/dashboard.component.spec.ts#L261); [DashboardComponent:70](../src/app/dashboard/dashboard.component.ts#L70) |
+| H-14, logout con navegacion rechazada | Promesa rechazada con Navigation failed, sin mensaje propio de UI. | [dashboard.component.spec.ts:261](../src/app/dashboard/dashboard.component.spec.ts#L261); [DashboardComponent:71](../src/app/dashboard/dashboard.component.ts#L71) |
 
 Las expectativas correctivas se agregaron para los defectos locales expresamente descritos en ENDPOINTS.md. No se modifico ese contrato para fingir que la UI ya cumple esas expectativas. No se aprueban correcciones productivas fuera de esta solicitud de pruebas.
 
@@ -247,17 +299,18 @@ Las expectativas correctivas se agregaron para los defectos locales expresamente
 
 El umbral de 85% por archivo de [REGLAS.md](../REGLAS.md) y [vitest.config.ts](../vitest.config.ts) no se modifico ni se redujeron exclusiones/gates. El conjunto productivo instrumentado incluye componentes, servicios, modelos ejecutables, utilidades y environment. Solo cambiaron tests y su helper en esta solicitud; los specs y harness no forman parte de ese denominador productivo. Las interfaces sin instrucciones no aportan ramas ejecutables.
 
-**Cobertura aprobada no equivale a suite aprobada:** el comando completo sigue con codigo 1 por los seis fallos. No se reutilizo el informe de cobertura anterior; Vitest lo regenero con reportOnFailure.
+**Cobertura aprobada no equivale a suite aprobada:** el comando completo final sigue con codigo 1 por los tres fallos residuales de H-13/H-14. No se reutilizo el informe de cobertura anterior; Vitest lo regenero con reportOnFailure despues de cada item.
 
-Artefactos de la ultima ejecucion:
+Artefactos de ejecucion:
 
-- [reports/testing-full.json](../reports/testing-full.json): casos, nombres, estados y mensajes de los seis fallos.
-- [coverage/coverage-summary.json](../coverage/coverage-summary.json): cobertura actual generada aun con fallos.
+- [reports/testing-full.json](../reports/testing-full.json): registro historico de la fase inicial con seis fallos.
+- [reports/h12-full.json](../reports/h12-full.json): suite final actual, 142 casos y tres fallos residuales.
+- [coverage/coverage-summary.json](../coverage/coverage-summary.json): cobertura final actual generada aun con fallos.
 - [coverage/index.html](../coverage/index.html): informe HTML.
 
 ## Pendientes y pruebas propuestas
 
-**Pendientes de correccion:** consultar H-11 a H-14 en HALLAZGOS.md. Sus seis regresiones ya estan implementadas y ejecutadas, no son pruebas pendientes ni propuestas. H-03 conserva la decision de persistencia pendiente; no se cambio a memoria ni se aprobo esa alternativa.
+**Pendientes de correccion tras ambos items:** H-13 y H-14, con tres regresiones fallidas. Consultar estados en HALLAZGOS.md; las regresiones estan implementadas y ejecutadas, no son pruebas propuestas. H-03 conserva la decision de persistencia pendiente; no se cambio a memoria ni se aprobo esa alternativa.
 
 **Pruebas propuestas, no implementadas ni ejecutadas en esta solicitud:**
 
@@ -266,7 +319,7 @@ Artefactos de la ultima ejecucion:
 - Token realmente expirado o revocado por el backend. Las fixtures de 401 comprueban la reaccion de UI, no implementan ni validan criptografia/expiracion.
 - Matriz adicional de tipos arbitrarios de status, priority y owner; solo se verificaron los casos concretos de tablas y defaults. No se afirma tolerancia para cualquier payload.
 
-No se ejecutaron build, auditoria de dependencias ni nuevas pruebas manuales de navegador en esta solicitud. El DOM automatizado usa plantillas reales mediante Angular TestBed. Tampoco se agregaron nuevas dependencias, commits o modificaciones a los flujos productivos.
+En la fase inicial solo de pruebas no se ejecutaron build ni cambios productivos. En la implementacion posterior aprobada se ejecutaron typecheck y build por item, y se cambiaron exclusivamente los dos componentes previstos. No se ejecutaron auditoria ni nuevas pruebas manuales de navegador, no se agregaron dependencias ni commits. El DOM automatizado sigue usando plantillas reales mediante Angular TestBed.
 
 ## Documentos consultados
 
