@@ -22,6 +22,11 @@ beforeAll(async () => {
       requests.push({ method: request.method, url: request.url, body, authorization: request.headers.authorization });
       response.setHeader('Content-Type', 'application/json');
       if (request.url === '/auth/login') {
+        if (JSON.parse(body).username === 'timeout-fixture') return;
+        if (JSON.parse(body).username === 'network-fixture') {
+          request.socket.destroy();
+          return;
+        }
         response.end(JSON.stringify({ token: 'fixture-token', user: { username: 'student' } }));
         return;
       }
@@ -39,6 +44,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  server.closeAllConnections();
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 });
 
@@ -59,4 +65,27 @@ it('uses the browser XHR adapter for JSON login, Bearer tasks and HTTP rejection
   });
   expect(requests[1]).toMatchObject({ method: 'GET', url: '/api/tasks?owner=student', authorization: 'Bearer fixture-token' });
   await expect(client.get(`${baseUrl}/rejected`)).rejects.toMatchObject({ response: { status: 401 } });
+});
+
+it('enforces the real login XHR timeout of 5000 ms against a nonresponding fixture', async () => {
+  const client = axios.create({ adapter: 'xhr' });
+  const started = Date.now();
+  await expect(client.post(`${baseUrl}/auth/login`, {
+    username: 'timeout-fixture', password: 'fixture-only', client: 'angular-workshop'
+  }, { timeout: 5000 })).rejects.toMatchObject({ code: 'ECONNABORTED' });
+  expect(Date.now() - started).toBeGreaterThanOrEqual(4900);
+}, 10000);
+
+it('rejects a tasks Bearer token denied by the local fixture with HTTP 401', async () => {
+  const client = axios.create({ adapter: 'xhr' });
+  await expect(client.get(`${baseUrl}/api/tasks?owner=denied-fixture`, {
+    headers: { Authorization: 'Bearer invalid-token' }
+  })).rejects.toMatchObject({ response: { status: 401 } });
+});
+
+it('rejects a real broken backend connection as a network error', async () => {
+  const client = axios.create({ adapter: 'xhr' });
+  await expect(client.post(`${baseUrl}/auth/login`, {
+    username: 'network-fixture', password: 'fixture-only', client: 'angular-workshop'
+  }, { timeout: 5000 })).rejects.toMatchObject({ code: 'ERR_NETWORK' });
 });

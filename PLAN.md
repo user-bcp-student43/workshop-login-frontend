@@ -2,6 +2,102 @@
 
 ## Aprobacion humana
 
+Seleccion actual confirmada por el usuario el 2026-10-19: solamente H-11 y H-12. Este documento es una propuesta; seleccionar los items no aprueba todavia su implementacion. La aprobacion historica del plan H-01 a H-10 no se transfiere a esta version. H-03 conserva pendiente la decision especifica sobre persistencia de sesion.
+
+El plan activo consta exclusivamente de los dos apartados Item siguientes. No se modifica codigo, contratos, pruebas ni estados de HALLAZGOS.md en esta solicitud. El plan anterior se conserva al final, colapsado como registro historico no vigente para esta tanda.
+
+## Item: H-11 - Lectura de sesion fuera del manejo de errores del dashboard
+
+**Item del backlog.** H-11, Bug, severidad media, Pendiente en [HALLAZGOS.md](HALLAZGOS.md). [DashboardComponent:45](src/app/dashboard/dashboard.component.ts#L45) obtiene token y usuario antes del try. El parseo en [SessionService:19](src/app/services/session.service.ts#L19) o el acceso a almacenamiento pueden lanzar; ngOnInit rechaza y loading queda true sin mensaje local.
+
+**Alcance propio.** Contener errores de recuperacion de sesion durante la inicializacion del dashboard y terminar el estado de carga. No corregir logout, navegacion del login ni escrituras de sesion. No cambiar la politica de localStorage, reparar/borrar datos persistidos automaticamente o introducir servicios nuevos.
+
+**Cambio propuesto.** Llevar la lectura de token y usuario al bloque protegido de ngOnInit, reutilizando el catch que ya usa userFacingError(error, 'tasks'), loading false y actualizacion de vista con NgZone/detectChanges. Si una lectura lanza, no ejecutar GET ni inventar un usuario alternativo para continuar; mostrar el mismo error local seguro. No ocultar el fallo devolviendo silenciosamente una sesion vacia desde SessionService.
+
+Con sesion legible, mantener el orden recuperar token/usuario -> comprobar token -> consultar tareas. Sin token, conservar la salida hacia /login sin GET. Usuario opcional o campos no string siguen estrechandose como hoy; owner vacio sigue permitido por el cliente. No cambiar filtrado, orden, defaults o estados HTTP.
+
+**Contrato preservado.** GET /api/tasks conserva URL, owner, Bearer y arreglo de respuesta; no se agrega timeout, refresh ni logout remoto. El cambio de UI solicitado por H-11 es exclusivamente que los errores locales de lectura ya no escapen ni dejen carga indefinida. En una implementacion posterior se actualizara la fila de ese defecto en docs/ENDPOINTS.md, sin alterar el contrato HTTP ni las politicas de 401/403.
+
+**Archivos a tocar al implementar este item:**
+
+- [src/app/dashboard/dashboard.component.ts](src/app/dashboard/dashboard.component.ts): incluir la recuperacion de sesion en el manejo de errores existente.
+- [src/app/dashboard/dashboard.component.spec.ts](src/app/dashboard/dashboard.component.spec.ts): reutilizar y ampliar las regresiones de H-11 y comprobar estados de vista.
+- [docs/ENDPOINTS.md](docs/ENDPOINTS.md): actualizar solo el comportamiento del error local de inicializacion corregido.
+- [docs/TESTING.md](docs/TESTING.md): registrar los resultados realmente obtenidos para H-11, manteniendo visibles fallos de otros items.
+- [HALLAZGOS.md](HALLAZGOS.md): actualizar evidencia y estado de H-11 solo despues de verificar la correccion.
+
+No se requiere editar SessionService, TasksService, AuthService, login, plantillas, configuracion ni dependencias. Los informes JSON/coverage son artefactos generados por las comprobaciones, no codigo nuevo.
+
+**Prueba antes de tocar produccion.** Ya existen dos regresiones activas: [JSON de usuario corrupto](src/app/dashboard/dashboard.component.spec.ts#L101) y [storage inaccesible](src/app/dashboard/dashboard.component.spec.ts#L111). Ejecutarlas primero contra el codigo actual, sin cambiar resolves por rejects ni omitirlas. Deben exigir que ngOnInit no escape, loading termine, aparezca el error local seguro y no se soliciten tareas.
+
+Antes de modificar el componente, reforzar esos tests con Router simulado: verificar ausencia de GET y de redireccion por el error de lectura. Parametrizar storage que falla al recuperar token y al recuperar usuario, para cubrir ambas llamadas. Reutilizar el helper existente; no duplicar dobles ni introducir any. Conservar pruebas de ausencia de token con usuario parseable, usuario opcional y camino feliz. Agregar una comprobacion de DOM que muestre el error y quite los placeholders despues del fallo.
+
+**Verificacion propuesta, no ejecutada en esta solicitud:**
+
+```powershell
+npm test -- src/app/dashboard/dashboard.component.spec.ts --testNamePattern="BUG H-11" --reporter=dot
+npm run test:typecheck
+npm run test:coverage -- --coverage.reportOnFailure --reporter=json --outputFile=reports/testing-full.json
+```
+
+Directorio: workshop-login-frontend, usando la ruta canonica de Windows C: para evitar duplicar entradas de cobertura. Registrar el rojo previo y el verde posterior de H-11; la cobertura debe mantener 85% o superior por archivo productivo modificado. Ejecutar despues el build existente. Los fallos de H-12, H-13 o H-14 que aun no se hayan corregido no deben ocultarse para presentar la suite completa como aprobada.
+
+## Item: H-12 - Navegacion rechazada con false queda silenciosa en login
+
+**Item del backlog.** H-12, Bug, severidad baja, Pendiente en [HALLAZGOS.md](HALLAZGOS.md). [LoginComponent:48](src/app/login/login.component.ts#L48) espera router.navigate pero ignora su booleano. Con false no se completa la navegacion y message sigue vacio, aunque busy termina y la sesion ya fue guardada.
+
+**Alcance propio.** Detectar el resultado false de la navegacion del login y comunicarlo mediante el manejo de error local existente. No corregir lecturas de dashboard, rollback de sesion, errores de logout ni el almacenamiento del token. No agregar rutas, guards, reintentos o cambios del servicio de autenticacion.
+
+**Cambio propuesto.** Capturar el resultado booleano de la navegacion a AUTH_ROUTES.dashboard. Si es false, convertir esa operacion no completada en un error local dentro del mismo try, sin informacion sensible, para reutilizar el catch actual y userFacingError(error, 'login'). Si es true, conservar la salida exitosa. Los rechazos de promesa siguen pasando por ese mismo catch. Mantener finally, busy false y markForCheck en todas las salidas; no duplicar la construccion del mensaje ni agregar anidamiento profundo.
+
+La sesion ya persistida se conserva tanto con false como con rechazo de navegacion, tal como hace hoy el flujo para errores de Router. No borrar token/usuario ni implementar H-13 indirectamente. No llamar de nuevo al POST o intentar otra navegacion para compensar el fallo.
+
+**Contrato preservado.** POST /auth/login conserva URL, credenciales originales, client, timeout de 5000 ms y respuesta token/user. No cambia la condicion de token ni el orden guardar sesion -> navegar. El ajuste solicitado por H-12 afecta solo al error visible cuando Router devuelve false; docs/ENDPOINTS.md se actualizara posteriormente en esa observacion, sin cambiar HTTP, persistencia o reacciones ante otros errores.
+
+**Archivos a tocar al implementar este item:**
+
+- [src/app/login/login.component.ts](src/app/login/login.component.ts): comprobar el resultado de navegacion y reutilizar el catch.
+- [src/app/login/login.component.spec.ts](src/app/login/login.component.spec.ts): reforzar la regresion de H-12 y verificar false, true y rechazo.
+- [docs/ENDPOINTS.md](docs/ENDPOINTS.md): actualizar solo la reaccion ante el booleano false corregido.
+- [docs/TESTING.md](docs/TESTING.md): registrar el antes/despues realmente ejecutado de H-12.
+- [HALLAZGOS.md](HALLAZGOS.md): actualizar evidencia y estado de H-12 solo despues de verificarlo.
+
+No se requiere editar AuthService, SessionService, dashboard, templates, helper, configuracion ni dependencias. No extraer una abstraccion que combine esta correccion con H-11.
+
+**Prueba antes de tocar produccion.** Reutilizar la [regresion activa de H-12](src/app/login/login.component.spec.ts#L284): POST correcto, Router devuelve false, busy false y mensaje local no vacio. Ejecutarla antes de cambiar el componente; no modificar su expectativa para aceptar silencio.
+
+Antes de corregir, ampliar la prueba para verificar token/usuario conservados, un solo POST y un solo intento de navegacion. Mantener controles para true (sin mensaje de error y flujo normal) y promesa rechazada (mensaje local, busy restablecido, sesion conservada). Agregar una fixture DOM con clic real y resultado false para demostrar que aparece el mensaje y vuelve a habilitarse Ingresar sin deteccion manual adicional despues del await.
+
+**Verificacion propuesta, no ejecutada en esta solicitud:**
+
+```powershell
+npm test -- src/app/login/login.component.spec.ts --testNamePattern="BUG H-12" --reporter=dot
+npm run test:typecheck
+npm run test:coverage -- --coverage.reportOnFailure --reporter=json --outputFile=reports/testing-full.json
+```
+
+Directorio: workshop-login-frontend, ruta canonica C:. Registrar la regresion roja previa y verde posterior, conservar cobertura de 85% o superior y ejecutar el build. Verificar que el camino feliz integrado de login/tareas/logout no cambia. No adaptar o excluir la regresion de H-13 para hacer verde toda la suite del login si H-13 permanece fuera del alcance.
+
+## Limites del plan activo
+
+Cada item se implementara y verificara por separado, aunque compartan una tanda. El unico registro de estados es HALLAZGOS.md. No se interpretan los resultados de docs/TESTING.md como pruebas nuevas ejecutadas durante esta propuesta. Las regresiones existentes son evidencia del problema; los comandos anteriores son comprobaciones futuras.
+
+H-03, H-13 y H-14 quedan fuera del plan activo. No se exige ocultar sus riesgos o fallos para cumplir un item seleccionado. Para elaborar este documento solo se realizaron lecturas, consulta del estado Git y validacion documental; no se ejecutaron pruebas, instalaciones, comandos de implementacion, commits ni cambios de codigo.
+
+## Documentos consultados para el plan activo
+
+- [docs/ENDPOINTS.md](docs/ENDPOINTS.md): contrato HTTP y comportamientos locales que solicitan corregir estos dos items.
+- [docs/GOOD_PRACTICES.md](docs/GOOD_PRACTICES.md): sesion centralizada, servicios, tipado y errores consistentes sin detalles externos.
+- [HALLAZGOS.md](HALLAZGOS.md): seleccion y evidencia de H-11/H-12.
+- Version anterior de PLAN.md: aprobacion historica y restriccion de H-03, preservadas abajo.
+
+Tambien se revisaron los componentes de login/dashboard y las regresiones existentes enlazadas en cada apartado. No se leyeron otros componentes del workspace.
+
+<details>
+<summary>Plan historico H-01 a H-10: registro previo, no vigente para esta tanda</summary>
+
+### Aprobacion humana historica
+
 El 2026-10-19 el usuario respondio "1" a la solicitud de confirmar la aprobacion del plan H-01 a H-10. Se registra esa aprobacion general. La segunda decision solicitada, permitir que recargar o abrir otra pestana exija login para H-03, no fue respondida: no implementar el cambio de persistencia de H-03 hasta contar con aprobacion explicita. Los demas incrementos pueden ejecutarse conservando la persistencia actual.
 
 ## Seleccion y alcance
@@ -197,3 +293,5 @@ La estructura final propuesta es pequena y compartida entre hallazgos:
 Todos los comandos Git y npm se ejecutaran desde workshop-login-frontend, y los informes/fixtures se guardaran dentro de ella. No leer ni modificar otros componentes; coordinar contratos externos sin cambiarlos ni asumir su implementacion. Antes de cualquier instalacion futura, revisar los cambios existentes del lockfile. No crear commits ni ramas sin solicitud.
 
 Tras implementar y verificar cada correccion en una fase posterior, actualizar evidencia y estado en HALLAZGOS.md, no llevar una segunda matriz aqui. Si un archivo citado cambia de lineas, corregir sus referencias de evidencia en esa matriz en el mismo incremento. Este plan no certifica que ninguna prueba, auditoria futura o meta de cobertura ya se haya cumplido.
+
+</details>

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { ChangeDetectorRef, Injector, NgZone, runInInjectionContext, ɵresolveComponentResources as resolveComponentResources } from '@angular/core';
+import { ChangeDetectorRef, Injector, NgZone, runInInjectionContext, Type, ɵresolveComponentResources as resolveComponentResources } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { vi } from 'vitest';
@@ -54,14 +54,22 @@ export async function prepareComponentResources(): Promise<void> {
   });
 }
 
-export async function createLoginFixture() {
+async function createComponentFixture<ComponentType>(component: Type<ComponentType>) {
   await prepareComponentResources();
   TestBed.configureTestingModule({
-    imports: [LoginComponent],
+    imports: [component],
     providers: [{ provide: Router, useValue: createRouter() }]
   });
-  const fixture = TestBed.createComponent(LoginComponent);
+  const fixture = TestBed.createComponent(component);
   fixture.detectChanges();
   await fixture.whenStable();
   return fixture;
+}
+
+export function createLoginFixture() {
+  return createComponentFixture(LoginComponent);
+}
+
+export function createDashboardFixture() {
+  return createComponentFixture(DashboardComponent);
 }
