@@ -19,4 +19,6 @@ jobs:
           cache: npm
       - run: npm install
       - run: npm test
+      - run: npm run test:typecheck
+      - run: npm run test:coverage
       - run: npm run build
